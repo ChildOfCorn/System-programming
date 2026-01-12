@@ -1,0 +1,147 @@
+1. 
+BOOL CreateProcess(
+  LPCWSTR lpApplicationName,
+  LPWSTR  lpCommandLine,
+  LPSECURITY_ATTRIBUTES lpProcessAttributes,
+  LPSECURITY_ATTRIBUTES lpThreadAttributes,
+  BOOL bInheritHandles,
+  DWORD dwCreationFlags,
+  LPVOID lpEnvironment,
+  LPCWSTR lpCurrentDirectory,
+  LPSTARTUPINFOW lpStartupInfo,
+  LPPROCESS_INFORMATION lpProcessInformation
+);
+
+2.
+#include <windows.h>
+#include <iostream>
+
+int main()
+{
+    STARTUPINFOW si{};
+    PROCESS_INFORMATION pi{};
+
+    si.cb = sizeof(si);
+
+    wchar_t commandLine[] = L"notepad.exe";
+
+    if (!CreateProcessW(
+        nullptr,
+        commandLine,
+        nullptr,
+        nullptr,
+        FALSE,
+        0,
+        nullptr,
+        nullptr,
+        &si,
+        &pi))
+    {
+        std::cerr << "CreateProcess failed. Error: " << GetLastError() << std::endl;
+        return 1;
+    }
+
+    std::cout << "Process started. PID: " << pi.dwProcessId << std::endl;
+
+    DWORD waitResult = WaitForSingleObject(pi.hProcess, 10000); // 10 секунд
+
+    if (waitResult == WAIT_TIMEOUT)
+    {
+        std::cout << "Process timeout exceeded. Terminating..." << std::endl;
+        TerminateProcess(pi.hProcess, 1);
+    }
+    else
+    {
+        DWORD exitCode;
+        GetExitCodeProcess(pi.hProcess, &exitCode);
+
+        if (exitCode == 0)
+            std::cout << "Process finished successfully." << std::endl;
+        else
+            std::cout << "Process finished with error code: " << exitCode << std::endl;
+    }
+
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+
+    return 0;
+}
+
+
+3
+#include <windows.h>
+#include <vector>
+#include <iostream>
+
+struct ChildProcess
+{
+    PROCESS_INFORMATION pi;
+    DWORD startTime;
+};
+
+int main()
+{
+    std::vector<ChildProcess> processes;
+    const wchar_t* commands[] = {
+        L"notepad.exe",
+        L"calc.exe"
+    };
+
+    for (auto cmd : commands)
+    {
+        STARTUPINFOW si{};
+        PROCESS_INFORMATION pi{};
+        si.cb = sizeof(si);
+
+        wchar_t commandLine[256];
+        wcscpy_s(commandLine, cmd);
+
+        if (CreateProcessW(nullptr, commandLine, nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi))
+        {
+            processes.push_back({ pi, GetTickCount() });
+            std::cout << "Started process PID: " << pi.dwProcessId << std::endl;
+        }
+    }
+
+    bool running = true;
+    while (running)
+    {
+        running = false;
+
+        for (auto& p : processes)
+        {
+            DWORD exitCode;
+            GetExitCodeProcess(p.pi.hProcess, &exitCode);
+
+            if (exitCode == STILL_ACTIVE)
+            {
+                running = true;
+                DWORD elapsed = GetTickCount() - p.startTime;
+
+                if (elapsed > 10000)
+                {
+                    std::cout << "Terminating long-running process PID: "
+                              << p.pi.dwProcessId << std::endl;
+                    TerminateProcess(p.pi.hProcess, 1);
+                }
+            }
+        }
+        Sleep(500);
+    }
+
+    for (auto& p : processes)
+    {
+        CloseHandle(p.pi.hThread);
+        CloseHandle(p.pi.hProcess);
+    }
+
+    return 0;
+}
+
+4
+
+HANDLE hEvent = CreateEventW(NULL, TRUE, FALSE, L"Global\\MySyncEvent");
+
+WaitForSingleObject(OpenEventW(EVENT_ALL_ACCESS, FALSE, L"Global\\MySyncEvent"), INFINITE);
+
+SetEvent(hEvent);

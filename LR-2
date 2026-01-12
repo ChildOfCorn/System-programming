@@ -1,0 +1,141 @@
+1.
+#include <iostream>
+#include <vector>
+#include <queue>
+#include <algorithm>
+#include <random>
+#include <iomanip>
+
+struct Process {
+    int id;
+    int arrivalTime;
+    int burstTime;
+    int remainingTime;
+    int priority;
+
+    // статистика
+    int startTime = -1;
+    int finishTime = -1;
+};
+
+2.
+std::vector<Process> generateProcesses(int count) {
+    std::vector<Process> processes;
+    std::random_device rd;
+    std::mt19937 gen(rd());
+
+    std::uniform_int_distribution<> arrivalDist(0, 10);
+    std::uniform_int_distribution<> burstDist(1, 10);
+    std::uniform_int_distribution<> priorityDist(1, 5);
+
+    for (int i = 0; i < count; ++i) {
+        Process p;
+        p.id = i + 1;
+        p.arrivalTime = arrivalDist(gen);
+        p.burstTime = burstDist(gen);
+        p.remainingTime = p.burstTime;
+        p.priority = priorityDist(gen);
+        processes.push_back(p);
+    }
+    return processes;
+}
+
+3.
+void simulateRoundRobin(std::vector<Process> processes, int quantum) {
+    std::cout << "\n=== Round Robin ===\n";
+    int time = 0;
+    std::queue<int> q;
+
+    int n = processes.size();
+    int completed = 0;
+
+    while (completed < n) {
+        // додавання нових процесів
+        for (int i = 0; i < n; ++i) {
+            if (processes[i].arrivalTime == time)
+                q.push(i);
+        }
+
+        if (q.empty()) {
+            time++;
+            continue;
+        }
+
+        int idx = q.front();
+        q.pop();
+
+        Process& p = processes[idx];
+
+        if (p.startTime == -1)
+            p.startTime = time;
+
+        int execTime = std::min(quantum, p.remainingTime);
+        time += execTime;
+        p.remainingTime -= execTime;
+
+        std::cout << "Process " << p.id
+                  << " | Remaining time: " << p.remainingTime << "\n";
+
+        // динамічна зміна пріоритету
+        if (p.remainingTime > 0 && p.priority > 1)
+            p.priority--;
+
+        if (p.remainingTime > 0) {
+            q.push(idx);
+        } else {
+            p.finishTime = time;
+            completed++;
+        }
+    }
+}
+
+4.
+void simulateFCFS(std::vector<Process> processes) {
+    std::cout << "\n=== FCFS ===\n";
+
+    std::sort(processes.begin(), processes.end(),
+              [](const Process& a, const Process& b) {
+                  return a.arrivalTime < b.arrivalTime;
+              });
+
+    int time = 0;
+    double totalWait = 0;
+
+    for (auto& p : processes) {
+        if (time < p.arrivalTime)
+            time = p.arrivalTime;
+
+        p.startTime = time;
+        time += p.burstTime;
+        p.finishTime = time;
+
+        int wait = p.startTime - p.arrivalTime;
+        totalWait += wait;
+
+        std::cout << "Process " << p.id
+                  << " | Start: " << p.startTime
+                  << " | Finish: " << p.finishTime
+                  << " | Wait: " << wait << "\n";
+    }
+
+    std::cout << "Average waiting time: "
+              << totalWait / processes.size() << "\n";
+}
+5.
+void analyze(const std::vector<Process>& processes) {
+    double waitSum = 0, turnSum = 0;
+
+    for (const auto& p : processes) {
+        int turnaround = p.finishTime - p.arrivalTime;
+        int waiting = turnaround - p.burstTime;
+
+        waitSum += waiting;
+        turnSum += turnaround;
+    }
+
+    std::cout << std::fixed << std::setprecision(2);
+    std::cout << "Average waiting time: "
+              << waitSum / processes.size() << "\n";
+    std::cout << "Average turnaround time: "
+              << turnSum / processes.size() << "\n";
+}

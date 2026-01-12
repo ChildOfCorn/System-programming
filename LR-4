@@ -1,0 +1,181 @@
+1.
+#include <windows.h>
+#include <stdio.h>
+#include <aclapi.h>
+
+void print_file_attributes(const char *path) {
+    HANDLE hFile = CreateFileA(
+        path,
+        GENERIC_READ,
+        FILE_SHARE_READ,
+        NULL,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+
+    if (hFile == INVALID_HANDLE_VALUE) {
+        printf("Cannot open file\n");
+        return;
+    }
+
+    DWORD attrs = GetFileAttributesA(path);
+    printf("Attributes:\n");
+    if (attrs & FILE_ATTRIBUTE_READONLY) printf("  READONLY\n");
+    if (attrs & FILE_ATTRIBUTE_HIDDEN)   printf("  HIDDEN\n");
+    if (attrs & FILE_ATTRIBUTE_SYSTEM)   printf("  SYSTEM\n");
+    if (attrs & FILE_ATTRIBUTE_ARCHIVE)  printf("  ARCHIVE\n");
+
+    LARGE_INTEGER size;
+    GetFileSizeEx(hFile, &size);
+    printf("File size: %lld bytes\n", size.QuadPart);
+
+    FILETIME ctime, atime, mtime;
+    GetFileTime(hFile, &ctime, &atime, &mtime);
+
+    SYSTEMTIME st;
+    FileTimeToSystemTime(&ctime, &st);
+    printf("Created: %02d.%02d.%04d %02d:%02d\n",
+           st.wDay, st.wMonth, st.wYear, st.wHour, st.wMinute);
+
+    FileTimeToSystemTime(&atime, &st);
+    printf("Last access: %02d.%02d.%04d %02d:%02d\n",
+           st.wDay, st.wMonth, st.wYear, st.wHour, st.wMinute);
+
+    FileTimeToSystemTime(&mtime, &st);
+    printf("Last write: %02d.%02d.%04d %02d:%02d\n",
+           st.wDay, st.wMonth, st.wYear, st.wHour, st.wMinute);
+
+    PSID owner;
+    PSECURITY_DESCRIPTOR sd;
+
+    GetSecurityInfo(
+        hFile,
+        SE_FILE_OBJECT,
+        OWNER_SECURITY_INFORMATION,
+        &owner,
+        NULL,
+        NULL,
+        NULL,
+        &sd
+    );
+
+    char name[256], domain[256];
+    DWORD nameLen = 256, domainLen = 256;
+    SID_NAME_USE use;
+
+    LookupAccountSidA(NULL, owner, name, &nameLen, domain, &domainLen, &use);
+    printf("Owner: %s\\%s\n", domain, name);
+
+    LocalFree(sd);
+    CloseHandle(hFile);
+}
+
+2.1
+#include <stdio.h>
+#include <time.h>
+
+#define BUF_SIZE 65536
+
+void copy_file_stdio(const char *src, const char *dst) {
+    FILE *in = fopen(src, "rb");
+    FILE *out = fopen(dst, "wb");
+    char buffer[BUF_SIZE];
+    size_t bytes;
+
+    clock_t start = clock();
+
+    while ((bytes = fread(buffer, 1, BUF_SIZE, in)) > 0) {
+        fwrite(buffer, 1, bytes, out);
+    }
+
+    clock_t end = clock();
+
+    printf("STDIO time: %.2f sec\n",
+           (double)(end - start) / CLOCKS_PER_SEC);
+
+    fclose(in);
+    fclose(out);
+}
+
+2.2
+#include <windows.h>
+#include <stdio.h>
+
+#define BUF_SIZE 65536
+
+void copy_file_winapi(const char *src, const char *dst) {
+    HANDLE hIn = CreateFileA(src, GENERIC_READ, FILE_SHARE_READ,
+        NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+
+    HANDLE hOut = CreateFileA(dst, GENERIC_WRITE, 0,
+        NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+
+    char buffer[BUF_SIZE];
+    DWORD readBytes, writtenBytes;
+
+    LARGE_INTEGER freq, start, end;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&start);
+
+    while (ReadFile(hIn, buffer, BUF_SIZE, &readBytes, NULL) && readBytes > 0) {
+        WriteFile(hOut, buffer, readBytes, &writtenBytes, NULL);
+    }
+
+    QueryPerformanceCounter(&end);
+
+    printf("WinAPI time: %.2f sec\n",
+        (double)(end.QuadPart - start.QuadPart) / freq.QuadPart);
+
+    CloseHandle(hIn);
+    CloseHandle(hOut);
+}
+
+3.
+#include <windows.h>
+#include <stdio.h>
+
+#define BUF_SIZE 4096
+
+typedef struct {
+    HANDLE file;
+    OVERLAPPED ov;
+    char buffer[BUF_SIZE];
+} AsyncFile;
+
+int main() {
+    AsyncFile files[2];
+    HANDLE events[2];
+
+    for (int i = 0; i < 2; i++) {
+        events[i] = CreateEvent(NULL, TRUE, FALSE, NULL);
+
+        files[i].file = CreateFileA(
+            i == 0 ? "file1.bin" : "file2.bin",
+            GENERIC_READ,
+            FILE_SHARE_READ,
+            NULL,
+            OPEN_EXISTING,
+            FILE_FLAG_OVERLAPPED,
+            NULL
+        );
+
+        ZeroMemory(&files[i].ov, sizeof(OVERLAPPED));
+        files[i].ov.hEvent = events[i];
+
+        ReadFile(files[i].file, files[i].buffer, BUF_SIZE, NULL, &files[i].ov);
+    }
+
+    WaitForMultipleObjects(2, events, TRUE, INFINITE);
+
+    for (int i = 0; i < 2; i++) {
+        DWORD bytes;
+        GetOverlappedResult(files[i].file, &files[i].ov, &bytes, FALSE);
+        printf("Read %lu bytes from file %d\n", bytes, i + 1);
+
+        CloseHandle(files[i].file);
+        CloseHandle(events[i]);
+    }
+
+    return 0;
+}

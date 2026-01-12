@@ -1,0 +1,178 @@
+1.
+#include <winsock2.h>
+#include <windows.h>
+#include <stdio.h>
+
+#pragma comment(lib, "ws2_32.lib")
+
+#define PORT 5555
+#define BUF_SIZE 1024
+
+int main() {
+    WSADATA wsa;
+    SOCKET server, client;
+    struct sockaddr_in addr;
+    char buffer[BUF_SIZE];
+
+    WSAStartup(MAKEWORD(2,2), &wsa);
+
+    server = socket(AF_INET, SOCK_STREAM, 0);
+
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(PORT);
+    addr.sin_addr.s_addr = INADDR_ANY;
+
+    bind(server, (struct sockaddr*)&addr, sizeof(addr));
+    listen(server, 5);
+
+    printf("TCP Server listening on port %d...\n", PORT);
+
+    client = accept(server, NULL, NULL);
+
+    int bytes = recv(client, buffer, BUF_SIZE, 0);
+    buffer[bytes] = '\0';
+
+    printf("Client: %s\n", buffer);
+    send(client, "Hello from server", 17, 0);
+
+    closesocket(client);
+    closesocket(server);
+    WSACleanup();
+    return 0;
+}
+
+2.
+#include <winsock2.h>
+#include <stdio.h>
+
+#pragma comment(lib, "ws2_32.lib")
+
+#define PORT 5555
+#define BUF_SIZE 1024
+
+int main() {
+    WSADATA wsa;
+    SOCKET sock;
+    struct sockaddr_in server;
+    char buffer[BUF_SIZE];
+
+    WSAStartup(MAKEWORD(2,2), &wsa);
+
+    sock = socket(AF_INET, SOCK_STREAM, 0);
+
+    server.sin_family = AF_INET;
+    server.sin_port = htons(PORT);
+    server.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    connect(sock, (struct sockaddr*)&server, sizeof(server));
+
+    send(sock, "Hello Server", 12, 0);
+    recv(sock, buffer, BUF_SIZE, 0);
+
+    printf("Server: %s\n", buffer);
+
+    closesocket(sock);
+    WSACleanup();
+    return 0;
+}
+
+3.
+CRITICAL_SECTION cs;
+
+DWORD WINAPI client_thread(LPVOID param) {
+    SOCKET client = (SOCKET)param;
+    char buffer[1024];
+
+    int bytes = recv(client, buffer, sizeof(buffer), 0);
+    buffer[bytes] = '\0';
+
+    EnterCriticalSection(&cs);
+    printf("Client says: %s\n", buffer);
+    LeaveCriticalSection(&cs);
+
+    send(client, "Message received", 16, 0);
+    closesocket(client);
+    return 0;
+}
+
+int main() {
+    InitializeCriticalSection(&cs);
+    // socket, bind, listen (як раніше)
+
+    while (1) {
+        SOCKET client = accept(server, NULL, NULL);
+        CreateThread(NULL, 0, client_thread, (LPVOID)client, 0, NULL);
+    }
+}
+
+4.
+#include <winsock2.h>
+#include <stdio.h>
+
+#define PORT 5556
+
+int main() {
+    WSADATA wsa;
+    SOCKET sock;
+    struct sockaddr_in server, client;
+    char buffer[1024];
+    int clientLen = sizeof(client);
+
+    WSAStartup(MAKEWORD(2,2), &wsa);
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+
+    server.sin_family = AF_INET;
+    server.sin_port = htons(PORT);
+    server.sin_addr.s_addr = INADDR_ANY;
+
+    bind(sock, (struct sockaddr*)&server, sizeof(server));
+
+    while (1) {
+        int bytes = recvfrom(sock, buffer, 1024, 0,
+            (struct sockaddr*)&client, &clientLen);
+
+        buffer[bytes] = '\0';
+        printf("Client: %s\n", buffer);
+
+        sendto(sock, buffer, bytes, 0,
+            (struct sockaddr*)&client, clientLen);
+    }
+}
+
+5.
+SOCKET sock;
+struct sockaddr_in server;
+
+sock = socket(AF_INET, SOCK_DGRAM, 0);
+server.sin_family = AF_INET;
+server.sin_port = htons(5556);
+server.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+sendto(sock, "Hello UDP", 9, 0,
+       (struct sockaddr*)&server, sizeof(server));
+
+6.
+typedef struct {
+    int id;
+    char name[32];
+    int score;
+} User;
+
+Json::Value root;
+root["id"] = user.id;
+root["name"] = user.name;
+root["score"] = user.score;
+
+Json::FastWriter writer;
+std::string json = writer.write(root);
+
+send(sock, json.c_str(), json.length(), 0);
+
+Json::Value root;
+Json::Reader reader;
+reader.parse(buffer, root);
+
+printf("ID=%d Name=%s Score=%d\n",
+       root["id"].asInt(),
+       root["name"].asCString(),
+       root["score"].asInt());
